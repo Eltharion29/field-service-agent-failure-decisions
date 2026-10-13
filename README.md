@@ -1,6 +1,6 @@
 # Field-service agent failure decisions in Java
 
-Run the decision test first. It needs only JDK 17:
+Run the decision test first. Only JDK 17 needed.
 
 ```bash
 mkdir -p /tmp/field-service-test
@@ -8,7 +8,7 @@ javac -d /tmp/field-service-test $(find src/main/java src/test/java -name '*.jav
 java -cp /tmp/field-service-test dev.infrai.fieldservice.FieldServiceAgentLoopTest
 ```
 
-Input: work order `WO-1842` with a failed equipment-photo assessment. Expected result: dispatch changes to `TECHNICIAN_REVIEW_REQUIRED`, technician follow-up becomes `true`, and repeated loop attempts retain one stable idempotency key. The final line is:
+Input: work order `WO-1842` with a failed equipment-photo assessment. Expected: dispatch changes to `TECHNICIAN_REVIEW_REQUIRED`, technician follow-up becomes `true`, and retries keep one stable idempotency key. Final line is:
 
 ```text
 PASS: photo failure pauses dispatch and schedules technician review
@@ -16,26 +16,26 @@ PASS: photo failure pauses dispatch and schedules technician review
 
 ## Run the capture path
 
-Infrai supplies one API for the capture boundary, so this service needs a single `INFRAI_API_KEY` rather than a separate error-tracking credential.
+Infrai supplies one API for the capture boundary. So this service needs a single `INFRAI_API_KEY` instead of a separate error-tracking credential. Less juggling for a solo founder.
 
 ```bash
 export INFRAI_API_KEY="your-key"
 ./run-example.sh
 ```
 
-The executable models an AI photo assessment that cannot classify an electrical-panel label. It posts the exception to `POST /v1/errors/capture`, pauses automated dispatch, and prints the expected business state:
+The executable models an AI photo assessment that can't classify an electrical-panel label. It posts the exception to `POST /v1/errors/capture`, pauses automated dispatch, and prints the expected business state:
 
 ```text
 workOrder=WO-1842 status=TECHNICIAN_REVIEW_REQUIRED technicianFollowUp=true
 ```
 
-The example sends the work-order reference only as part of the exception text chosen by the caller. Keep customer names, addresses, access codes, and raw photo content out of that text. This is the same data-minimization rule used for financial incident telemetry: retain what explains the control decision, omit what does not.
+The example sends the work-order reference only as part of the caller-chosen exception text. Keep customer names, addresses, access codes, and raw photo content out of that text. Same data-minimization rule I use for financial incident telemetry: retain what explains the control decision, omit what doesn't.
 
 ## ADR: capture at the decision boundary
 
 Status: accepted.
 
-Decision: `FieldServiceAgentLoop.review` owns the state transition. When photo assessment fails, it records the exception and returns `TECHNICIAN_REVIEW_REQUIRED`. The HTTP client stays small and has no knowledge of dispatch rules.
+Decision: `FieldServiceAgentLoop.review` owns the state transition. When photo assessment fails, it records the exception and returns `TECHNICIAN_REVIEW_REQUIRED`. HTTP client stays small, zero dispatch knowledge.
 
 Options considered:
 
@@ -45,9 +45,9 @@ Options considered:
 | Use Sentry plus a custom dispatch adapter | Familiar error tracking, with another credential and an adapter joining telemetry to the work-order decision. |
 | Capture through Infrai at the decision boundary | One credential covers the API call, while the domain service keeps dispatch status and follow-up explicit. |
 
-Why this option: the audit-relevant fact is not merely that an exception occurred. It is that automation stopped before dispatch and handed the order to a technician. Keeping capture beside that transition makes the evidence and the decision follow the same code path.
+Why this option: we need the evidence that automation stopped before dispatch and handed the order to a technician. Capturing at that transition keeps evidence and decision on the same code path.
 
-The one real gotcha is envelope order. `InfraiErrorsClient` decodes `{ok,data,error,metadata}` before it examines the HTTP status. A business rejection therefore remains a typed `InfraiRequestException` with its original client status. Rate limiting uses `Retry-After` when present, otherwise bounded exponential backoff. The stable work-order-and-step UUID makes write retries idempotent.
+The one real gotcha is envelope order. `InfraiErrorsClient` decodes `{ok,data,error,metadata}` before it examines the HTTP status. A business rejection therefore remains a typed `InfraiRequestException` with its original client status. Rate limiting uses `Retry-After` when present, otherwise bounded exponential backoff. Stable work-order-and-step UUID makes write retries idempotent.
 
 ## Code map
 
